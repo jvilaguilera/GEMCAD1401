@@ -1,29 +1,106 @@
-###########################################################################. 
-# Project: 0358082 PDA GEMCAD 1401                                        #
-# Title: "Observational Study to Evaluate the Use of Targeted             #
-#        Therapies in Metastatic Colorectal Cancer - GEMCAD 1401"         #
-# Authors: Manuel Zamparini, Julia Vila Guilera, Xabier Garcia de Albeniz #
+###########################################################################.
+# Title: Script to Estimate the Per-Protocol Effect on Overall Survival   #
+# of Targeted  Therapies at First Line vs Second Line in Patients with    #
+# Metastatic Colorectal Cancer using the GEMCAD 1401 registry data        #
 # Analysis: Sequential Trial Emulation Analysis                           #
-###########################################################################. 
+# Authors: Julia Vila Guilera, Manuel Zamparini, Xabier Garcia de Albeniz #
+###########################################################################.
+
+# --------------------------Load required libraries-------------------------
+require(dplyr)
+require(survival)
+require(sandwich)
+require(lmtest)
+require(ggplot2)
+require(survminer)
+require(splitstackshape)
+require(geepack)
+require(mice)
+require(purrr)
+require(tidyr)
+require(splines)
+require(rms)
+require(sqldf)
+require(boot)
+# -------------------------------Load data ----------------------------------
+
+## Load data, call it ds
+# This data should be cleaned and in the wide form. 
+ds<-read.csv(file=path, header=T) 
+
+## Structural variables
+
+# subject_custom_code - subject ID 
+# FechaInicioTtoVisitaBasal.3 - Baseline date
+# FechaInicioTtoDesTerDirVisitaBasal.3 - Date of initiation of targeted therapies at line 1
+# FechaPrimeraProgresion - Date of first progression
+# FechaPrimerPS34 - Date of first record of a performance score of 3 or 4
+# FechaOtherReasons - Date of first record of hospital admission OR severe toxicity
+# FechaInicioTtoLinia2 - Date of initiation of second line chemotherapy treatment and targeted therapies
+# StatusSeguimientoStatus.5 - Status update (alive, dead) at last follow-up
+# MAB1wRetained - Person received MAB during or before the week (true/false)
+# MABLine2 - Person started MAB at second line (true/false)
+# FechaMABLine2 - if(MABLine2==TRUE, FechaInicioTtoLinia2, na)
+# QMT2wRetained - Person received QMT2 during or before the week (true/false)
+# startW - Date of week starting
+# endW - Date of week ending
+# week - Week number
+# fupW - Time in weeks from basal to death or last follow-up
+# death - StatusSeguimientoStatus.5 == "Muerto" before 209 weeks of follow-up (true/false)
+# death_tot - StatusSeguimientoStatus.5 == "Muerto" (true/false)
+# trial - Indicate the trial number
+
+# Baseline covariates
+
+# age - age at baseline
+# agesq - age squared at baseline
+# SexoDatosDemograficos.1 - sex (female/male) at baseline
+# PS_basal_imp - PS values at baseline, imputed (0,1,2,3,4)
+# LDHnormal_basal - LDH catgeories (normal, abnormal, not evaluated)
+# Charlson2_basal - Charlson categories (<3, >=3) at baseline
+# RASMutation_basal - RAS mutational status (mutant, wild type, not evaluated) at baseline
+# BRAFMutation_basal - BRAF mutational (mutant, wild type, not evaluated) status at baseline
+# Microsatel_basal - Microsatelites type (MSS, MSI, Not evaluated) at baseline
+# LocationPrimaryTumor_basal - Location of primary tumor (left / right) at baseline
+# PrimarySurgery_basal - Surgery (yes/no) at baseline
+# LiverAffected_basal - Liver affected (yes/no) at baseline
+# LungAffected_basal - Lung affected (yes/no) at baseline
+# PeritonealAffected_basal - Peritoenal affected (yes/no) at baseline
+# NodeAffected_basal - Nodes affected (yes/no) at baseline
+# NumberOrgansAffected_basal - Number of organs affected (1, >1) at baseline
+# Liver2_basal - Categories of liver metastasis (liver mts and elsewhere, no liver mts, only liver mts with >10 lesions or >5cm lesions, only liver mts 1-3 lesions <=5cm, only liver mts 4-9 lesions <=5cm) at baseline
+# Lung2_basal- Categories of lung affectations (lung mts and elsewhere, no lung mts, only lung mts with >10 lesions or >5cm lesions, only lung mts 1-3 lesions <=5cm, only lung mts 4-9 lesions <=5cm
+
+
+# Time-varying covariates
+
+# PS_eval_1 to PS_eval_23 - PS values (0,1,2,3,4) at each evaluation visit (from 1 to 23)
+# Charlson2_eval_1 to Charlson2_eval_23 - Charlson categories (<3, >=3) at each evaluation visit (from 1 to 23)
+# TimesinceLDH_1 to TimesinceLDH_23 - Time since last LDH (0-165 days) at each evaluation visit (from 1 to 23)
+# LDH_eval_1  to LDH_eval_23 - LDH values (28 - 6145) at each evaluation visit (from 1 to 23)
+# LDHnormal_eval_1 to LDHnormal_eval_23 - LDH categories (normal/abnormal/not evaluated) at each evaluation visit (from 1 to 23)
+# LDHnormal.cf_eval_1 to LDHnormal.cf_eval_23 - LDH categories (normal/abnormal/not evaluated) carried forward through evaluation visits (1 to 23)
+# FechaEval_1 to FechaEval_23 - Date of evaluation visits (from 1 to 23)
+# ToxicidadGrado_eval_1 to ToxicidadGrado_eval_23 - Severe toxicity (yes/no) at each evaulation visit (from 1 to 23)
 
 # Emulate 8 sequential trials----
 
 ## Create 8 sequential trials ----
 
 # Transform data to long format, to have a better view of the weeks
-ds12l <- expandRows(ds12, "fupW", drop=F)  
+dsl <- expandRows(ds, "fupW", drop=F)  
 
 # Exclude all patients not eligible at time 0 of trial 1 (exclude those with a previous progression, toxicity, ps34, or other reasons)
-excluded <- ds12l %>% filter(pmin(progression, ps34, otherreasons, na.rm = TRUE) <= start) 
-ds12le <- ds12l %>% anti_join(excluded, by = c("subject_custom_code"))
+excluded <- dsl %>% filter(pmin(FechaPrimeraProgresion, FechaPrimerPS34, FechaOtherReasons, na.rm = TRUE) <= start) 
+dsle <- dsl %>% anti_join(excluded, by = c("subject_custom_code"))
 excluded <- c() #Create object that keeps track of excluded subjects in each sequential trial creation
 
 trial_list <- list() # THIS WILL CONTAINS ALL THE TRIALS' DATASET
-trial_data <- ds12le # STARTING TRIAL
+trial_data <- dsle # STARTING TRIAL
 
 for (i in 1:8) {
   if (i > 1) {
-    trial_data <- ds12le %>%
+    trial_data <- dsle %>%
       anti_join(tibble(subject_custom_code = excluded), by = "subject_custom_code") %>% # BY THE SECOND TRIAL, WE MUST EXCLUDE ALL UN-ELIGIBLE PATIENTS
       arrange(subject_custom_code, week) %>%
       group_by(subject_custom_code) %>%
@@ -37,7 +114,7 @@ for (i in 1:8) {
     mutate(trial = i,
            arm = ifelse(first(MAB1wRetained) == 1, 0, 1)) %>% #DEFINE ARM: IF MAB1 IS STARTED ON THE FIRST WEEK: ARM=0 (MAB IN FIRST LINE GROUP), ELSE ARM=1 (MAB IN SECOND LINE GROUP)
     mutate(keep_row = ifelse(arm == 0, TRUE, MAB1wRetained == 0)) %>% # IF ARM==0, WE KEEP ALL LINES, ELSE WE KEEP JUST LINES BEFORE STARTING MAB1
-    mutate(keep_row = ifelse(arm == 1 & MAB1wRetained == 0 & !is.na(QMT2) & is.na(MAB2), QMT2wRetained == 0, keep_row)) %>% #IF ARM==1 (AND NOT YET STARTED MAB1), WE CENSOR IN THE MOMENT OF QMT2 WITHOUT MAB2
+    mutate(keep_row = ifelse(arm == 1 & MAB1wRetained == 0 & !is.na(FechaInicioTtoLinia2) & is.na(FechaMABLine2), QMT2wRetained == 0, keep_row)) %>% #IF ARM==1 (AND NOT YET STARTED MAB1), WE CENSOR IN THE MOMENT OF QMT2 WITHOUT MAB2
     mutate(keep_row2 = lag(keep_row, default = TRUE)) %>% #THE LAG FUNCTION KEEPS THE FIRST WEEK OF CENSORING 
     filter(keep_row2) %>%
     select(-keep_row, -keep_row2) %>%
@@ -54,9 +131,9 @@ for (i in 1:8) {
     trial_current %>%
       group_by(subject_custom_code) %>%
       summarise(
-        exclude = any((arm == 0 | (!is.na(progression) & progression <= startW & week==i+1) |  #SUBJECTS THAT STARTED MAB1 OR DEVELOPED CONTRO-INDICATIONS BEFORE WEEK X ARE UNELIGIBLE FOR TRIAL X
-                         (!is.na(ps34) & ps34 <= startW & week==i+1) | 
-                         (!is.na(otherreasons) & otherreasons >= startW-6 & otherreasons <= startW & week==i+1))),
+        exclude = any((arm == 0 | (!is.na(FechaPrimeraProgresion) & FechaPrimeraProgresion <= startW & week==i+1) |  #SUBJECTS THAT STARTED MAB1 OR DEVELOPED CONTRO-INDICATIONS BEFORE WEEK X ARE UNELIGIBLE FOR TRIAL X
+                         (!is.na(FechaPrimerPS34) & FechaPrimerPS34 <= startW & week==i+1) | 
+                         (!is.na(FechaOtherReasons) & FechaOtherReasons >= startW-6 & FechaOtherReasons <= startW & week==i+1))),
         .groups = 'drop'
       ) %>%
       filter(exclude) %>%
@@ -70,7 +147,6 @@ for (i in 1:8) {
 # IN EACH SEQUENTIAL TRIALS, THE WEEK CONSIDERED AS BASELINE IS SHIFTED, SO WE NEED TO UPDATE BASELINE VALUES
 
 # Define a function to update baseline values based on the evaluation date and start date
-
 
 update_basal <- function(data, basal_var, eval_prefix, date_prefix, date_comparator) {
   # Loop through each of the 23 potential evaluation points
@@ -137,9 +213,9 @@ for (i in 1:8) {
     summarise(
       startW_min = min(startW),                  
       endW_max = max(endW),
-      MAB1 = min(MAB1),
-      MAB2 = min(MAB2),
-      QMT2 = min(QMT2),
+      FechaInicioTtoDesTerDirVisitaBasal.3 = min(FechaInicioTtoDesTerDirVisitaBasal.3),
+      FechaMABLine2 = min(FechaMABLine2),
+      FechaInicioTtoLinia2 = min(FechaInicioTtoLinia2),
       death = max(death),
       death_tot = max(death_tot), #Variables _tot are immune from follow-up truncation, useful to describe the total observed period
       fup_w = ceiling(as.numeric(difftime(endW_max, startW_min, units = "weeks"))),
@@ -152,8 +228,8 @@ for (i in 1:8) {
     trial_data_wide<- trial_data_wide %>% 
     mutate(
       fup = endW_max-startW_min,
-      censored4MAB1 = ifelse(arm==1 & !is.na(MAB1) & MAB1<=endW_max+7,1,0), # MAB IN SECOND LINE PATIENTS ARE CENSORED IF THEY START MAB1
-      censored4noMAB2 = ifelse(arm==1 & is.na(MAB2) & !is.na(QMT2) & QMT2<=endW_max+7,1,0) #MAB IN SECOND LINE PATIENTS ARE CENSORED IF THEY START QMT2 BUT NOT MAB2 
+      censored4MAB1 = ifelse(arm==1 & !is.na(FechaInicioTtoDesTerDirVisitaBasal.3) & FechaInicioTtoDesTerDirVisitaBasal.3<=endW_max+7,1,0), # MAB IN SECOND LINE PATIENTS ARE CENSORED IF THEY START MAB1
+      censored4noMAB2 = ifelse(arm==1 & is.na(FechaMABLine2) & !is.na(FechaInicioTtoLinia2) & FechaInicioTtoLinia2<=endW_max+7,1,0) #MAB IN SECOND LINE PATIENTS ARE CENSORED IF THEY START QMT2 BUT NOT MAB2 
     )
   
   # Figure 1. Time under followup after applying the artificial censoring
@@ -536,7 +612,7 @@ for (i in 1:8) {
   trial_data_arm1 <- subset(trial_data_long, arm == 1)
   trial_data_arm1$PS_basal_impNEW <- relevel(factor(trial_data_arm1$PS_basal_impNEW), ref = "0")
   trial_data_arm1_model1 <- subset(trial_data_arm1, aux_week < 16)
-  trial_data_arm1_model2 <- subset(trial_data_arm1, !is.na(QMT2) & startW<=QMT2 & QMT2<=endW)
+  trial_data_arm1_model2 <- subset(trial_data_arm1, !is.na(FechaInicioTtoLinia2) & startW<=FechaInicioTtoLinia2 & FechaInicioTtoLinia2<=endW)
   cw.fit1 <- glm(formula, data = trial_data_arm1_model1, family = binomial())
   cw.fit2 <- glm(formula2, data = trial_data_arm1_model2, family = binomial())
   weights1[[i]]<-summary(cw.fit1)
@@ -549,7 +625,7 @@ for (i in 1:8) {
   ### Apply probabilities to each person-week ----
   #APPLY PROBABILITIES FROM 2 MODELS TO SUBJECTS WITH ARM==1 (SUBJECTS WITH ARM==0 WILL WEIGHT 1)
   trial_data_long$prMAB[trial_data_long$arm == 1 & trial_data_long$aux_week<16] <- p.mod1.obs
-  trial_data_long$prMAB[trial_data_long$arm == 1 & !is.na(trial_data_long$QMT2) & trial_data_long$startW<=trial_data_long$QMT2 & trial_data_long$QMT2<=trial_data_long$endW] <- p.mod2.obs
+  trial_data_long$prMAB[trial_data_long$arm == 1 & !is.na(trial_data_long$FechaInicioTtoLinia2) & trial_data_long$startW<=trial_data_long$FechaInicioTtoLinia2 & trial_data_long$FechaInicioTtoLinia2<=trial_data_long$endW] <- p.mod2.obs
   trial_data_long$prMAB[trial_data_long$arm == 1 & is.na(trial_data_long$prMAB)] <- 0
 
   ### Calculate weight factors----
@@ -562,10 +638,10 @@ for (i in 1:8) {
     mutate(
       factor.w = case_when(
         arm == 0 ~ 1,
-        arm == 1 & (is.na(QMT2) | (!is.na(QMT2) & QMT2wRetained==0)) ~ 1 / (1 - prMAB),
-        arm == 1 & startW<=QMT2 & QMT2<=endW & !is.na(MAB2)~ 1 / prMAB,
-        arm == 1 & startW<=QMT2 & QMT2<=endW & is.na(MAB2)~ 0,
-        arm == 1 & startW>QMT2 ~ 0
+        arm == 1 & (is.na(FechaInicioTtoLinia2) | (!is.na(FechaInicioTtoLinia2) & QMT2wRetained==0)) ~ 1 / (1 - prMAB),
+        arm == 1 & startW<=FechaInicioTtoLinia2 & FechaInicioTtoLinia2<=endW & !is.na(MAB2)~ 1 / prMAB,
+        arm == 1 & startW<=FechaInicioTtoLinia2 & FechaInicioTtoLinia2<=endW & is.na(MAB2)~ 0,
+        arm == 1 & startW>FechaInicioTtoLinia2 ~ 0
       )
     )
   
@@ -1598,62 +1674,3 @@ fulladj_timepoints <- bsl.cw.graph2 %>%
   select(time, R0_CI, R1_CI,RD_CI, RR_CI)
 
 
-# Meta-analysis of sequential trials----
-
-library(meta)
-
-## Unadjusted----
-df <- data.frame(
-  trial = 1:8,
-  hr =       h_u,
-  ci_lower = l_u,
-  ci_upper = u_u)
-
-df$se <- (log(df$ci_upper) - log(df$ci_lower)) / (2 * 1.96)
-
-result <- metagen(
-  TE = log(df$hr),             
-  seTE = df$se,
-  studlab = paste("Trial", df$trial),
-  sm = "HR",                   
-  method.tau = "REML",         
-  hakn = TRUE                  
-)
-
-## Baseline-adjusted ----
-df <- data.frame(
-  trial = 1:8,
-  hr =       h_a,
-  ci_lower = l_a,
-  ci_upper = u_a)
-
-df$se <- (log(df$ci_upper) - log(df$ci_lower)) / (2 * 1.96)
-
-result <- metagen(
-  TE = log(df$hr),             
-  seTE = df$se,
-  studlab = paste("Trial", df$trial),
-  sm = "HR",                   
-  method.tau = "REML",         
-  hakn = TRUE                  
-)
-
-## Fully-adjusted ----
-
-df <- data.frame(
-  trial = 1:8,
-  hr =       h_ca,
-  ci_lower = l_ca,
-  ci_upper = u_ca)
-
-
-df$se <- (log(df$ci_upper) - log(df$ci_lower)) / (2 * 1.96)
-
-result <- metagen(
-  TE = log(df$hr),             
-  seTE = df$se,
-  studlab = paste("Trial", df$trial),
-  sm = "HR",                   
-  method.tau = "REML",         
-  hakn = TRUE                  
-)
