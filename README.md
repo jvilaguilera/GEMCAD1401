@@ -1,37 +1,51 @@
-**Title:** GEMCAD Real-World Data Study. When to Start Targeted Therapies in Metastatic Colorectal Cancer
+# About
 
-**Overview:** This repository contains the R scripts developed by Julia Vila Guilera, Manuel Zamparini, and Xabier Garcia de Albeniz for the GEMCAD Real-World Data Study. The GEMCAD Real-World Data Study consists of the analysis of a dataset of metastatic colorectal cancer patients in Spain to estimate the causal effect of initiating targeted therapies at different lines of treatment on their overall survival. To draw causal inference estimates without introducing bias, a clone-censor-weight analysis was implemented. Additionally, a sequential trial emulation analysis was carried out to contrast the results obtained. 
+This repository contains the R scripts developed to conduct the analyses of the GEMCAD 1401 registry data. 
+Code was developed by Julia Vila Guilera, Manuel Zamparini, and Xabier Garcia de Albeniz.
 
-**Data:** The Spanish Multidisciplinary Group on Digestive Cancer (GEMCAD) Registry collects data from colorectal cancer patients across Spain. Data from 1014 eligible patients was used to implement these analyses. 
+**Study Title**:Studying When to Add Biological Therapy to Cytotoxic Therapy in Advanced Cancer Care Using Real World Data (RWD): 
+Challenges and Solutions to Avoid Biases that Generate Immortal Time
 
-**Clone-censor-weight analysis:** Using real-world data to quantify the effect of treatment initiation at different times on survival outcomes can introduce bias since only those who live for a longer time can receive treatment at later stages. Cloning-censoring-weighting is an analytical approach that eliminates immortal time bias by: 1-cloning people to assign 1 clone to each different treatment strategy, 2- censoring if and when the clones deviate from their assigned treatment strategy, 3- developing inverse probability weights to adjust for the selection bias introduced by informative censoring. 
+**Overview**: We conducted a study that aimed to estimate the effect of initiating monoclonal antibody (mAB) therapies along with first 
+line chemotherapy vs initiating them with second line chemotherapy in the overall survival of patients diagnosed
+with metastatic colorectal cancer (mCRC). To investigate this effect, we used data from 1014 eligible patients from 
+the Spanish Multidisciplinary Group on Digestive Cancer (GEMCAD) Registry data. Careful study design choices were needed to 
+estimate the effect of interest without introducing immortal time bias due to selection or due to treatment misclassification.  
 
-**Sequential trial emulation analysis:** An alternative to address immortal time bias due to initiation of treatment at different times is the emulation of a sequence of hypothetical trials, each with a baseline at a different time point. Briefly, sequential trial emulation consists of creating a series of trials starting at each sequential time point. At each time point, patient's eligibility is assessed and they are assigned to the strategy their observed data is consistent with at that time point. Once the patient deviates from their strategy, they are censored.
+**Methods**: To avoid design choices that would introduce immortal time, we specified a target trial to estimate the effect 
+of of “initiating mAB within 8 weeks (grace period) of starting first line chemotherapy” versus “deferring their addition
+ to second line chemotherapy” on the overall survival of mCRC patients. We emulated the trial by aligning eligibility criteria
+with time zero (corresponding to the date of initiation of first line chemotherapy) and by classifying patients into treatment 
+strategies via two methods: 
 
-**Analysis steps:**
+- Via cloning, censoring and weighting
+- Via the emulation of 8 sequential trials, starting at each of the grace period weeks.
 
-- setup: this script loads required packages and imports data
-- prep: this script cleans and preprocesses data to prepare the analytical dataset (ds12)
+Then, survival curves adjusted for baseline and post-baseline covariates were estimated via weighted pooled logistic regression.
 
-*Clone-censor-weight analysis*
-- cloning: this script clones the population, assigns each clone to a treatment strategy, and censors if and when a clone stops adhereing to their assigned strategy
-- param.unadj: outputs the unadjusted effect estimates
-- param.bsl.adj: outputs the baseline adjusted effect estimates
-- weightmodel: estimates the probability of receiving treatment each week conditional on baseline and postbaseline patient characteristics and develops censoring weights for each clone-week. 
-- param.full.adj: outputs the baseline and postbaseline censoring weights-adjusted effect estimates
+**Analytical scripts**
 
-*Sequential trial emulation analysis*
-- Trial setup: Considered variations in baseline and maximum follow-up truncation
-- Trials Analysis:
-  - Assessed time under follow-up
-  - Non-parametric survival curves
-  - Parametric models with different adjustments:
-    - Unadjusted
-    - Baseline-adjusted
-    - Baseline and censoring weight-adjusted (Weight estimation: Derived from the probability of receiving treatment each week, based on baseline and post-baseline patient characteristics)
-  - Risk estimation:
-    - Absolute and relative risk
-    - Hazard ratios
-- Pooled analysis: Repeated the same analysis on pooled trials, combining all sequential trials into one dataset
-- Confidence intervals: Estimated using 500 bootstrap replications
-- Meta-analysis: Conducted to investigate potential anomalies between trials
+The script for the clone-censor-weight analysis available in this repository contains the following analytical steps: 
+- Loading of required libraries and data (unavailable)
+- Specification of study variables
+- Cloning of individuals and assignment to treatment strategies
+- Censoring of individuals when they deviate from assigned strategy
+- Estimation of subject-specific time-varying non-stabilized inverse-probability weights
+- Estimation of non-parametric (unadjusted) survival curves
+- Estimation of parametric (unadjusted) survival curves
+- Estimation of parametric baseline-adjusted survival curves
+- Estimation of parametric baseline and time-varying IPW-adjusted survival curves
+- Bootstrapping procedures to estimate variance
+
+The script for the sequential trial emulation analysis available in this repository contains the following analytical steps:
+- Loading of required libraries and data (unavailable)
+- Specification of study variables
+- Trials creation and assignment to treatment strategies (censoring individuals when they deviate from assigned strategy)
+- Function for updating baseline variables based on the trial number
+- Estimation of non-parametric (unadjusted) survival curves in single trials
+- Estimation of parametric (unadjusted) survival curves in single trials
+- Estimation of parametric baseline-adjusted survival curves in single trials
+- Estimation of subject-specific time-varying non-stabilized inverse-probability weights
+- Estimation of parametric baseline and time-varying IPW-adjusted survival curves in single trials
+- Estimation of all the previous survival curves in the Pooled trial
+- Bootstrapping procedures to estimate variance in the Pooled trial
