@@ -3,7 +3,7 @@
 # of Targeted  Therapies at First Line vs Second Line in Patients with    #
 # Metastatic Colorectal Cancer using the GEMCAD 1401 registry data        #
 # Analysis: Sequential Trial Emulation Analysis                           #
-# Authors: Julia Vila Guilera, Manuel Zamparini, Xabier Garcia de Albeniz #
+# Authors: Manuel Zamparini, Julia Vila Guilera, Xabier Garcia de Albeniz #
 ###########################################################################.
 
 # --------------------------Load required libraries-------------------------
