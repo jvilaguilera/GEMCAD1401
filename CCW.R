@@ -94,7 +94,7 @@ ds_MAB1$outcome<- ifelse(adherence1, #if they adhere
                          "censored") #if they don't, their status will be censored
 ds_MAB1$fup<- ifelse(adherence1, #if they adhere
       (coalesce(DeathDate, LastFupDate)) - IndexDate +1, #follow-up will be til death or last follow-up date
-      pmin(coalesce(DeathDate, DateofCensoring)) - IndexDate+1) #if they don't, follow-up will be til death or censoring date (whichever first)
+      pmin((coalesce(DeathDate, DateOfCensoring)), DateOfCensoring) - IndexDate+1) #if they don't, follow-up will be til death or censoring date (whichever first)
 
 #For strategy 2
 ds_MAB2$outcome<- ifelse(adherence2, #if they adhere
@@ -102,7 +102,7 @@ ds_MAB2$outcome<- ifelse(adherence2, #if they adhere
                          "censored") #if they don't, their status will be censored
 ds_MAB2$fup<- ifelse(adherence2,  #if they adhere
                      (coalesce(DeathDate, LastFupDate)) - IndexDate+1, #follow-up will be til death or last follow-up date
-                     pmin(coalesce(DeathDate, DateOfCensoring)) - IndexDate+1) #if they don't, follow-up will be til death or censoring date (whichever first)
+                     pmin((coalesce(DeathDate, DateOfCensoring)), DateOfCensoring) - IndexDate+1) #if they don't, follow-up will be til death or censoring date (whichever first)
 
 
 #Cloned, censored population:
@@ -199,7 +199,7 @@ dslongQMT2w$prcens2<-p.cens2.obs
 
 #Turn cloned dataset (dsc) into long format
 dsc$fup_w<-ceiling(as.numeric(dsc$fup)/7) # follow-up in weeks
-dsclong <- expandRows(dscwide, "fup_w", drop=F) #expand data into long format
+dsclong <- expandRows(dsc, "fup_w", drop=F) #expand data into long format
 dsclong$time <- sequence(rle(dsclong$subject_id)$lengths) #create weekly indicator
 
 # Merge probabilities estimated in uncloned population (p1 and p2) to cloned dataset
@@ -220,10 +220,13 @@ dsclong$pmAB<-ifelse(!is.na(dsclong$prcens2), dsclong$prcens2,
 dsclong$factor.w1 <-NA 
 dsclong <- dsclong %>%
   mutate(
-    factor.w1= ifelse(time<8 | adh_indicator == 2, 1, #for weeks 1-7, if adherence has been established, factor=1
-                       ifelse(time==8 & adh_indicator == 1 & (is.na(fupMAB1) | fupMAB1>timetoadherence), 1, # for week 8, if adherence is established that week but not due to initiating MAB, factor=1
-                              ifelse(time==8 & adh_indicator == 1 & timetoadherence==fupMAB1, 1/pMAB, #for week 8, if adherence is established due to initiating MAB, factor=1/p
-                                     ifelse(time>=8 & adh_indicator == 0, 0,  factor.w1))))) #for any other scenario or week>8, factor = 0. 
+    factor.w1= case_when(
+		adh_indicator == 2 ~ 1, # if adherence has already been established in previous weeks (adh2), factor=1
+		time<8 ~ 1, #if adherence not yet established, but still in grace period, factor=1
+		time==8 & adh_indicator == 1 & (is.na(fupMAB1) | fupMAB1>timetoadherence) ~ 1, #  if adherence is established that week but not due to initiating MAB, factor=1
+		time==8 & adh_indicator == 1 & timetoadherence==fupMAB1 ~ 1/pmAB, # if adherence is established that week due to initiating MAB, factor=1/p
+		time>=8 & adh_indicator == 0 ~ 0,  # if adherence not yet established, factor = 0
+		TRUE ~ NA))
 
 # Calculate weight, the cumulative product of the factors for the weight at each person-week
 dsclong <- dsclong %>%
@@ -237,12 +240,14 @@ dsclong <- dsclong %>%
 dsclong$factor.w2<-NA
 dsclong <- dsclong %>%
   mutate(
-    factor.w2 = ifelse(adh_indicator == 2, 1, #weeks after adherence has been established, factor=1
-                              ifelse( adh_indicator == 1 & (is.na(fupMAB2) | fupMAB2>timetoadherence), 1, #the week adherence is established but not due to initiating mab, factor=1
-                                      ifelse(adh_indicator == 1 & timetoadherence==fupMAB2, 1/pMAB, #the week adherence is established due to initiating mab2, factor=1/p
-                                             ifelse(adh_indicator==0 & !is.na(fupMAB1) & time==fupMAB1, 0, #the week adherence is broken due to initiation of mAb as first line, factor=0
-                                             ifelse(adh_indicator==0 & !is.na(fupQMT2) & time==fupQMT2 & is.na(timetoadherence), 1, #the week of qmt2 if adherence is not established, factor=1
-                                               ifelse(adh_indicator==0, 1/(1-pMAB),  factor.w2))))))) #the weeks before starting qmt2
+    factor.w2 = case_when(
+		adh_indicator == 2 ~ 1, #if adherence has already been established in previous weeks (adh2), factor=1
+        adh_indicator == 1 & (is.na(fupMAB2) | fupMAB2>timetoadherence) ~ 1, #the week adherence is established but not due to initiating mab, factor=1
+        adh_indicator == 1 & timetoadherence==fupMAB2 ~ 1/pmAB, #the week adherence is established due to initiating mab2, factor=1/p
+        adh_indicator==0 & !is.na(fupMAB1) & time==fupMAB1 ~ 0, #the week adherence is broken due to initiation of mAb as first line, factor=0
+        adh_indicator==0 & !is.na(fupQMT2) & time==fupQMT2 & is.na(timetoadherence) ~ 1, #the week of qmt2 if adherence is not established, factor=1
+        adh_indicator==0 ~ 1/(1-pmAB), #the weeks before starting qmt2
+		TRUE ~ NA)) 
 
 dsclong <- dsclong %>%
   group_by(subject_id,arm) %>%
@@ -303,11 +308,11 @@ unadj.glm.I <- glm(event==0 ~ arm
                    , family=binomial(), data=dsc.surv)
 
 ## Estimate risk of survival for each person-week ----
-arm0 <- data.frame(cbind(seq(0, 209),0,(seq(0, 209))^2))
-arm1 <- data.frame(cbind(seq(0, 209),1,(seq(0, 209))^2))
+arm0 <- data.frame(cbind(seq(1, 209),0))
+arm1 <- data.frame(cbind(seq(1, 209),1))
 
-colnames(arm0) <- c("time", "arm", "timesq")
-colnames(arm1) <- c("time", "arm", "timesq")
+colnames(arm0) <- c("time", "arm")
+colnames(arm1) <- c("time", "arm")
 
 arm0$p.noevent0 <- predict(unadj.glm.I, arm0, type="response") #predict probability of no-event at each person-week
 arm1$p.noevent1 <- predict(unadj.glm.I, arm1, type="response")
@@ -318,7 +323,7 @@ arm1$surv1 <- cumprod(arm1$p.noevent1)
 arm0$risk0<-1-arm0$surv0 #computation of risk of death for each week
 arm1$risk1<-1-arm1$surv1 
 
-unadj.graph <- merge(arm0, arm1, by=c("time", "timesq"))
+unadj.graph <- merge(arm0, arm1, by=c("time"))
 unadj.graph$survdiff <- unadj.graph$surv1-unadj.graph$surv0 #Calculate survival risk difference at each week
 unadj.graph$riskratio<- unadj.graph$risk1/unadj.graph$risk0 #Calculate risk ratio at each week
 unadj.graph$time_mo <- unadj.graph$time / 4.3452  # Time in months
@@ -349,7 +354,7 @@ print(unadj.graph[unadj.graph$time == 209, c("riskratio")]) #Survival Risk ratio
 
 ## Data pre-processing for survival model ----
 dsc$fup_w<- ceiling(as.numeric((dsc$fup+1)/7)) #follow-up time in weeks
-dsc$arm <- as.numeric(recode(dsc.c$arm, "MAB1" = 0, "MAB2" = 1)) #change arm variable to integer to allow for interaction term
+dsc$arm <- as.numeric(recode(dsc$arm, "MAB1" = 0, "MAB2" = 1)) #change arm variable to integer to allow for interaction term
 dsc.surv <- expandRows(dsc, "fup_w", drop=F) #Turn data into long format (person-week data)
 dsc.surv$time <- sequence(rle(dsc.surv$subject_id)$lengths) #create a variable to identify each time unit (in weeks)
 dsc.surv$event <- ifelse(dsc.surv$time==dsc.surv$fup_w & dsc.surv$death==1, 1, 0) #create a variable that indicates the week of the event (death)
@@ -459,7 +464,6 @@ full.adj.glm.I<-glm(event==0 ~
 # We need to predict survival for each subject under arm0 and arm1
 bsl.cw.arm0 <- expandRows(dsc, count=209, count.is.col=F) 
 bsl.cw.arm0$time <- rep(seq(1, 209), nrow(dsc))
-bsl.cw.arm0$timesq <- bsl.cw.arm0$time^2
 bsl.cw.arm0<- bsl.cw.arm0 %>% group_by(arm) %>% mutate(clone = arm) 
 bsl.cw.arm0$arm <- 0
 
@@ -509,7 +513,7 @@ btsp_input_ds<-ds
 
 # Create a function that conducts the analysis for the subsetted bootstrap sample,
 # and stores the effect estimates at each iteration
-boot.func <- function(data, indices, file_name=ccw_bootstraps_full.adj.xlsx) { 
+boot.func <- function(data, indices, file_name="ccw_bootstraps_full.adj.xlsx") { 
   ds<-data[indices,]
   
   #Create a bootstrap-specific subject custom code:
@@ -596,10 +600,10 @@ time_points <- c(27, 53, 79, 105, 131, 157, 183, 209) #define time points at whi
 bsl.cw.adj_timepoints <- bsl.cw.graph.plusCI %>%
   filter(time %in% time_points) %>% 
   mutate(
-    RR_CI = paste0((", RiskRatio95CILow, ";", RiskRatio95CIUp, ")"),
-    RD_CI = paste0((", survdiff95CILow, ";", survdiff95CIUp, ")"),
-    R0_CI = paste0( (", surv095CILow, ";", surv095CIUp, ")"),
-    R1_CI = paste0((", surv195CILow, ";", surv195CIUp, ")")
+    RR_CI = paste0(round(riskratio,3)," (", RiskRatio95CILow, ";", RiskRatio95CIUp, ")"),
+    RD_CI = paste0(round(survdiff, 3), " (", survdiff95CILow, ";", survdiff95CIUp, ")"),
+    R0_CI = paste0(round(surv0,3), " (", surv095CILow, ";", surv095CIUp, ")"),
+    R1_CI = paste0(round(surv1,3), " (", surv195CILow, ";", surv195CIUp, ")")
   ) %>%
   select(time, RR_CI, RD_CI, R0_CI, R1_CI) 
 
