@@ -94,7 +94,7 @@ ds_MAB1$outcome<- ifelse(adherence1, #if they adhere
                          "censored") #if they don't, their status will be censored
 ds_MAB1$fup<- ifelse(adherence1, #if they adhere
       (coalesce(DeathDate, LastFupDate)) - IndexDate +1, #follow-up will be til death or last follow-up date
-      pmin((coalesce(DeathDate, DateOfCensoring)), DateOfCensoring) - IndexDate+1) #if they don't, follow-up will be til death or censoring date (whichever first)
+      pmin(DeathDate, DateOfCensoring, na.rm=TRUE) - IndexDate+1) #if they don't, follow-up will be til death or censoring date (whichever first)
 
 #For strategy 2
 ds_MAB2$outcome<- ifelse(adherence2, #if they adhere
@@ -102,7 +102,7 @@ ds_MAB2$outcome<- ifelse(adherence2, #if they adhere
                          "censored") #if they don't, their status will be censored
 ds_MAB2$fup<- ifelse(adherence2,  #if they adhere
                      (coalesce(DeathDate, LastFupDate)) - IndexDate+1, #follow-up will be til death or last follow-up date
-                     pmin((coalesce(DeathDate, DateOfCensoring)), DateOfCensoring) - IndexDate+1) #if they don't, follow-up will be til death or censoring date (whichever first)
+                     pmin(DeathDate, DateOfCensoring, na.rm=TRUE) - IndexDate+1) #if they don't, follow-up will be til death or censoring date (whichever first)
 
 
 #Cloned, censored population:
